@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Orange Cat Pop! - Persistent</title>
+    <title>Orange Cat Pop! - World Score</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@700;900&display=swap');
@@ -83,69 +83,52 @@
             100% { transform: translate(-50%, -120px) scale(1.6); opacity: 0; }
         }
 
-        .reset-btn {
-            margin-top: 2rem;
-            color: #6b5a3e;
-            font-size: 0.9rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            opacity: 0.6;
-            background: transparent;
-            border: none;
-            cursor: pointer;
-        }
-
         .status-tag {
             position: absolute;
             bottom: 20px;
             color: #f38241;
             font-size: 0.8rem;
-            opacity: 0.5;
+            opacity: 0.8;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 4px 12px;
+            border-radius: 20px;
         }
     </style>
 </head>
 <body>
 
     <div class="score-number" id="score">0</div>
-    <div class="total-pops-label">TOTAL POPS</div>
+    <div class="total-pops-label">WORLD WIDE POPS</div>
 
     <div class="cat-frame" id="game-btn">
-        <!-- รูปปกติที่อัปเดตใหม่ -->
         <img src="https://i.ibb.co/nN34kBWy/image.jpg" id="cat-closed" class="cat-image" alt="Cat Closed">
-        <!-- รูปตอนกดที่อัปเดตใหม่ -->
         <img src="https://i.ibb.co/GfJ290Hr/image.jpg" id="cat-open" class="cat-image" alt="Cat Open">
     </div>
 
-    <button onclick="handleReset()" class="reset-btn">Reset Score</button>
-    <div class="status-tag" id="status">Syncing...</div>
+    <div class="status-tag" id="status">Syncing World Score...</div>
+    <!-- เตือนความจำพิเศษสำหรับคุณ -->
+    <div style="position:fixed; bottom:5px; color:#4a3f2d; font-size:10px;">🚗 Reminder: ชั้น B</div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, increment, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, increment, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
-        // Firebase Configuration (Provided by environment)
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'popcat-game';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'global-popcat';
 
-        let count = 0;
         let user = null;
         const scoreEl = document.getElementById('score');
         const gameBtn = document.getElementById('game-btn');
         const statusEl = document.getElementById('status');
 
-        // Initialize Audio once
+        // Audio System
         let audioCtx = null;
-        function initAudio() {
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        }
-
-        // Play Sound
         function playPopSound() {
-            initAudio();
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
@@ -160,7 +143,6 @@
             osc.stop(audioCtx.currentTime + 0.1);
         }
 
-        // Create Pop Text Effect
         function createPopText(x, y) {
             const el = document.createElement('div');
             el.className = 'pop-text';
@@ -171,32 +153,28 @@
             setTimeout(() => el.remove(), 400);
         }
 
-        // Firestore Logic (Rule 1 & 3 compliant)
-        async function syncScore(isReset = false) {
+        // บันทึกคะแนนลงใน Public Data (Rule 1: public/data/...)
+        async function syncGlobalScore() {
             if (!user) return;
-            const scoreDoc = doc(db, 'artifacts', appId, 'users', user.uid, 'gameData', 'score');
-            
-            if (isReset) {
-                await setDoc(scoreDoc, { count: 0 });
-            } else {
-                await setDoc(scoreDoc, { count: increment(1) }, { merge: true });
+            const globalScoreDoc = doc(db, 'artifacts', appId, 'public', 'data', 'world_score');
+            try {
+                // เพิ่มคะแนน 1 แต้มในฐานข้อมูลกลาง
+                await setDoc(globalScoreDoc, { total: increment(1) }, { merge: true });
+            } catch (e) { 
+                console.error("Sync Error", e); 
             }
         }
 
-        // Handle Click/Touch
-        async function handlePress(e) {
+        function handlePress(e) {
             if (e.cancelable) e.preventDefault();
             document.body.classList.add('is-pressing');
-            
             playPopSound();
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
             createPopText(clientX, clientY);
 
-            // บันทึกลง Cloud ทันที
-            if (user) {
-                syncScore();
-            }
+            // ส่งคะแนนไปสะสมรวมกับคนอื่น
+            syncGlobalScore();
         }
 
         function handleRelease(e) {
@@ -204,38 +182,34 @@
             document.body.classList.remove('is-pressing');
         }
 
-        window.handleReset = async () => {
-            if (confirm("ต้องการรีเซ็ตคะแนนทั้งหมดใช่หรือไม่?")) {
-                await syncScore(true);
+        // ล็อกอินและดึงคะแนนรวมของโลก
+        const initGame = async () => {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
             }
         };
 
-        // Auth & Initial Load
+        initGame();
+
         onAuthStateChanged(auth, (u) => {
             user = u;
             if (user) {
-                statusEl.innerText = "Connected: " + user.uid.substring(0, 8);
-                // Listen to score changes in real-time
-                const scoreDoc = doc(db, 'artifacts', appId, 'users', user.uid, 'gameData', 'score');
-                onSnapshot(scoreDoc, (docSnap) => {
+                statusEl.innerText = "Connected to World Server";
+                
+                // ดึงคะแนนรวมของทุกคนมาแสดง (Public Data)
+                const globalScoreDoc = doc(db, 'artifacts', appId, 'public', 'data', 'world_score');
+                onSnapshot(globalScoreDoc, (docSnap) => {
                     if (docSnap.exists()) {
-                        count = docSnap.data().count;
-                        scoreEl.innerText = count;
-                    } else {
-                        scoreEl.innerText = 0;
+                        scoreEl.innerText = docSnap.data().total.toLocaleString();
                     }
-                }, (error) => {
-                    console.error("Firestore error:", error);
-                    statusEl.innerText = "Connection Error";
-                });
-            } else {
-                signInAnonymously(auth).catch(err => {
-                    statusEl.innerText = "Offline Mode";
+                }, (err) => { 
+                    statusEl.innerText = "Reconnecting...";
                 });
             }
         });
 
-        // Event Listeners
         gameBtn.addEventListener('mousedown', handlePress);
         window.addEventListener('mouseup', handleRelease);
         gameBtn.addEventListener('touchstart', handlePress, { passive: false });
