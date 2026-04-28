@@ -101,35 +101,37 @@
     <div class="total-pops-label" id="label">WORLD WIDE POPS</div>
 
     <div class="cat-frame" id="game-btn">
-        <!-- รูปปกติ -->
         <img src="https://i.ibb.co/nN34kBWy/image.jpg" id="cat-closed" class="cat-image" alt="Cat Closed">
-        <!-- รูปตอนกด -->
         <img src="https://i.ibb.co/GfJ290Hr/image.jpg" id="cat-open" class="cat-image" alt="Cat Open">
     </div>
 
-    <div class="status-tag" id="status">Checking connection...</div>
-    <div style="position:fixed; bottom:5px; color:#4a3f2d; font-size:10px;">🚗 Reminder: จอดรถชั้น B</div>
+    <div class="status-tag" id="status">Starting...</div>
+    <div style="position:fixed; bottom:5px; color:#4a3f2d; font-size:10px;">🚗 Reminder: รถจอดที่ชั้น B นะครับ</div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, increment, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, increment, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
-        // Firebase Setup
+        // Firebase Configuration
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'global-popcat';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'global-popcat-v2';
 
         let user = null;
-        let localCount = 0;
+        // ดึงคะแนนเก่าจาก LocalStorage มาก่อนเลยถ้ามี
+        let localCount = parseInt(localStorage.getItem('cat_pops') || '0');
+        
         const scoreEl = document.getElementById('score');
         const gameBtn = document.getElementById('game-btn');
         const statusEl = document.getElementById('status');
         const labelEl = document.getElementById('label');
 
-        // Audio System
+        // แสดงคะแนนล่าสุดที่จำได้ทันที
+        scoreEl.innerText = localCount.toLocaleString();
+
         let audioCtx = null;
         function playPopSound() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -157,14 +159,14 @@
             setTimeout(() => el.remove(), 400);
         }
 
-        // ฟังก์ชันบันทึกคะแนน (ทำงานแม้จะ Offline อยู่)
         async function syncGlobalScore() {
             if (!user) return;
             const globalScoreDoc = doc(db, 'artifacts', appId, 'public', 'data', 'world_score');
             try {
+                // อัปเดตขึ้น Cloud
                 await setDoc(globalScoreDoc, { total: increment(1) }, { merge: true });
             } catch (e) {
-                console.log("Cloud sync delayed...");
+                console.log("Cloud sync pending...");
             }
         }
 
@@ -173,9 +175,10 @@
             document.body.classList.add('is-pressing');
             playPopSound();
             
-            // เพิ่มคะแนนแสดงผลทันที (ไม่รอ Server)
+            // เพิ่มคะแนนแสดงผลทันทีแบบ Offline-First
             localCount++;
             scoreEl.innerText = localCount.toLocaleString();
+            localStorage.setItem('cat_pops', localCount);
 
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
@@ -189,8 +192,9 @@
             document.body.classList.remove('is-pressing');
         }
 
-        // ล็อกอิน
-        const initGame = async () => {
+        // เริ่มระบบเชื่อมต่อ
+        const startApp = async () => {
+            statusEl.innerText = "Connecting to World...";
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
@@ -198,31 +202,32 @@
                     await signInAnonymously(auth);
                 }
             } catch (err) {
-                statusEl.innerText = "Offline Mode (Local Count)";
-                labelEl.innerText = "MY POPS";
+                statusEl.innerText = "Offline Mode (Saved Locally)";
             }
         };
 
-        initGame();
+        startApp();
 
         onAuthStateChanged(auth, (u) => {
             user = u;
             if (user) {
-                statusEl.innerText = "World Server Connected";
-                labelEl.innerText = "WORLD WIDE POPS";
+                statusEl.innerText = "World Server Connected 🌍";
                 
                 const globalScoreDoc = doc(db, 'artifacts', appId, 'public', 'data', 'world_score');
+                
+                // ฟังคะแนนจากคนอื่นแบบ Real-time
                 onSnapshot(globalScoreDoc, (docSnap) => {
                     if (docSnap.exists()) {
-                        const total = docSnap.data().total;
-                        // อัปเดตค่าล่าสุดจาก Server (ถ้าค่า Server เยอะกว่าค่า Local)
-                        if (total > localCount) {
-                            localCount = total;
+                        const cloudTotal = docSnap.data().total;
+                        // ถ้าคะแนนบน Cloud เยอะกว่าที่เรามี ให้ขยับตาม Cloud
+                        if (cloudTotal > localCount) {
+                            localCount = cloudTotal;
                             scoreEl.innerText = localCount.toLocaleString();
+                            localStorage.setItem('cat_pops', localCount);
                         }
                     }
                 }, (err) => {
-                    statusEl.innerText = "Syncing...";
+                    statusEl.innerText = "Syncing with others...";
                 });
             }
         });
