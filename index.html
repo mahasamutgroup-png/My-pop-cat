@@ -1,10 +1,9 @@
-```html
 <!DOCTYPE html>
 <html lang="th">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Orange Cat Pop!</title>
+    <title>Orange Cat Pop! - Persistent</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@700;900&display=swap');
@@ -95,6 +94,14 @@
             border: none;
             cursor: pointer;
         }
+
+        .status-tag {
+            position: absolute;
+            bottom: 20px;
+            color: #f38241;
+            font-size: 0.8rem;
+            opacity: 0.5;
+        }
     </style>
 </head>
 <body>
@@ -103,49 +110,57 @@
     <div class="total-pops-label">TOTAL POPS</div>
 
     <div class="cat-frame" id="game-btn">
-        <img src="https://i.ibb.co/VWzqcV6G/image.jpg" id="cat-closed" class="cat-image" alt="Cat Closed">
-        <img src="https://i.ibb.co/DfnfnQMP/image.jpg" id="cat-open" class="cat-image" alt="Cat Open">
+        <!-- รูปปกติที่อัปเดตใหม่ -->
+        <img src="https://i.ibb.co/nN34kBWy/image.jpg" id="cat-closed" class="cat-image" alt="Cat Closed">
+        <!-- รูปตอนกดที่อัปเดตใหม่ -->
+        <img src="https://i.ibb.co/GfJ290Hr/image.jpg" id="cat-open" class="cat-image" alt="Cat Open">
     </div>
 
-    <button onclick="resetScore()" class="reset-btn">Reset Score</button>
+    <button onclick="handleReset()" class="reset-btn">Reset Score</button>
+    <div class="status-tag" id="status">Syncing...</div>
 
-    <script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, increment, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+
+        // Firebase Configuration (Provided by environment)
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'popcat-game';
+
         let count = 0;
+        let user = null;
         const scoreEl = document.getElementById('score');
         const gameBtn = document.getElementById('game-btn');
-        
-        let audioCtx = null;
+        const statusEl = document.getElementById('status');
 
+        // Initialize Audio once
+        let audioCtx = null;
         function initAudio() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
 
+        // Play Sound
         function playPopSound() {
             initAudio();
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-
-            // ใช้ Oscillator แบบสั้นๆ เพื่อให้กดรัวได้โดยเสียงไม่สะสมจนหาย
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-
-            oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(500, audioCtx.currentTime);
-            oscillator.frequency.exponentialRampToValueAtTime(1100, audioCtx.currentTime + 0.05);
-
-            gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-
-            oscillator.start();
-            oscillator.stop(audioCtx.currentTime + 0.1);
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(500, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1100, audioCtx.currentTime + 0.05);
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
         }
 
+        // Create Pop Text Effect
         function createPopText(x, y) {
             const el = document.createElement('div');
             el.className = 'pop-text';
@@ -156,18 +171,32 @@
             setTimeout(() => el.remove(), 400);
         }
 
-        function handlePress(e) {
-            if (e.cancelable) e.preventDefault();
+        // Firestore Logic (Rule 1 & 3 compliant)
+        async function syncScore(isReset = false) {
+            if (!user) return;
+            const scoreDoc = doc(db, 'artifacts', appId, 'users', user.uid, 'gameData', 'score');
             
+            if (isReset) {
+                await setDoc(scoreDoc, { count: 0 });
+            } else {
+                await setDoc(scoreDoc, { count: increment(1) }, { merge: true });
+            }
+        }
+
+        // Handle Click/Touch
+        async function handlePress(e) {
+            if (e.cancelable) e.preventDefault();
             document.body.classList.add('is-pressing');
-            count++;
-            scoreEl.innerText = count;
             
             playPopSound();
-            
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
             createPopText(clientX, clientY);
+
+            // บันทึกลง Cloud ทันที
+            if (user) {
+                syncScore();
+            }
         }
 
         function handleRelease(e) {
@@ -175,11 +204,38 @@
             document.body.classList.remove('is-pressing');
         }
 
-        function resetScore() {
-            count = 0;
-            scoreEl.innerText = count;
-        }
+        window.handleReset = async () => {
+            if (confirm("ต้องการรีเซ็ตคะแนนทั้งหมดใช่หรือไม่?")) {
+                await syncScore(true);
+            }
+        };
 
+        // Auth & Initial Load
+        onAuthStateChanged(auth, (u) => {
+            user = u;
+            if (user) {
+                statusEl.innerText = "Connected: " + user.uid.substring(0, 8);
+                // Listen to score changes in real-time
+                const scoreDoc = doc(db, 'artifacts', appId, 'users', user.uid, 'gameData', 'score');
+                onSnapshot(scoreDoc, (docSnap) => {
+                    if (docSnap.exists()) {
+                        count = docSnap.data().count;
+                        scoreEl.innerText = count;
+                    } else {
+                        scoreEl.innerText = 0;
+                    }
+                }, (error) => {
+                    console.error("Firestore error:", error);
+                    statusEl.innerText = "Connection Error";
+                });
+            } else {
+                signInAnonymously(auth).catch(err => {
+                    statusEl.innerText = "Offline Mode";
+                });
+            }
+        });
+
+        // Event Listeners
         gameBtn.addEventListener('mousedown', handlePress);
         window.addEventListener('mouseup', handleRelease);
         gameBtn.addEventListener('touchstart', handlePress, { passive: false });
@@ -188,6 +244,3 @@
     </script>
 </body>
 </html>
-
-```
-
