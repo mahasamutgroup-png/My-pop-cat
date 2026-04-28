@@ -98,22 +98,24 @@
 <body>
 
     <div class="score-number" id="score">0</div>
-    <div class="total-pops-label">WORLD WIDE POPS</div>
+    <div class="total-pops-label" id="label">WORLD WIDE POPS</div>
 
     <div class="cat-frame" id="game-btn">
+        <!-- รูปปกติ -->
         <img src="https://i.ibb.co/nN34kBWy/image.jpg" id="cat-closed" class="cat-image" alt="Cat Closed">
+        <!-- รูปตอนกด -->
         <img src="https://i.ibb.co/GfJ290Hr/image.jpg" id="cat-open" class="cat-image" alt="Cat Open">
     </div>
 
-    <div class="status-tag" id="status">Syncing World Score...</div>
-    <!-- เตือนความจำพิเศษสำหรับคุณ -->
-    <div style="position:fixed; bottom:5px; color:#4a3f2d; font-size:10px;">🚗 Reminder: ชั้น B</div>
+    <div class="status-tag" id="status">Checking connection...</div>
+    <div style="position:fixed; bottom:5px; color:#4a3f2d; font-size:10px;">🚗 Reminder: จอดรถชั้น B</div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
         import { getFirestore, doc, setDoc, increment, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
+        // Firebase Setup
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
@@ -121,9 +123,11 @@
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'global-popcat';
 
         let user = null;
+        let localCount = 0;
         const scoreEl = document.getElementById('score');
         const gameBtn = document.getElementById('game-btn');
         const statusEl = document.getElementById('status');
+        const labelEl = document.getElementById('label');
 
         // Audio System
         let audioCtx = null;
@@ -133,9 +137,9 @@
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.type = 'sine';
-            osc.frequency.setValueAtTime(500, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(1100, audioCtx.currentTime + 0.05);
-            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1000, audioCtx.currentTime + 0.05);
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
             osc.connect(gain);
             gain.connect(audioCtx.destination);
@@ -153,15 +157,14 @@
             setTimeout(() => el.remove(), 400);
         }
 
-        // บันทึกคะแนนลงใน Public Data (Rule 1: public/data/...)
+        // ฟังก์ชันบันทึกคะแนน (ทำงานแม้จะ Offline อยู่)
         async function syncGlobalScore() {
             if (!user) return;
             const globalScoreDoc = doc(db, 'artifacts', appId, 'public', 'data', 'world_score');
             try {
-                // เพิ่มคะแนน 1 แต้มในฐานข้อมูลกลาง
                 await setDoc(globalScoreDoc, { total: increment(1) }, { merge: true });
-            } catch (e) { 
-                console.error("Sync Error", e); 
+            } catch (e) {
+                console.log("Cloud sync delayed...");
             }
         }
 
@@ -169,11 +172,15 @@
             if (e.cancelable) e.preventDefault();
             document.body.classList.add('is-pressing');
             playPopSound();
+            
+            // เพิ่มคะแนนแสดงผลทันที (ไม่รอ Server)
+            localCount++;
+            scoreEl.innerText = localCount.toLocaleString();
+
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
             createPopText(clientX, clientY);
 
-            // ส่งคะแนนไปสะสมรวมกับคนอื่น
             syncGlobalScore();
         }
 
@@ -182,12 +189,17 @@
             document.body.classList.remove('is-pressing');
         }
 
-        // ล็อกอินและดึงคะแนนรวมของโลก
+        // ล็อกอิน
         const initGame = async () => {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                statusEl.innerText = "Offline Mode (Local Count)";
+                labelEl.innerText = "MY POPS";
             }
         };
 
@@ -196,16 +208,21 @@
         onAuthStateChanged(auth, (u) => {
             user = u;
             if (user) {
-                statusEl.innerText = "Connected to World Server";
+                statusEl.innerText = "World Server Connected";
+                labelEl.innerText = "WORLD WIDE POPS";
                 
-                // ดึงคะแนนรวมของทุกคนมาแสดง (Public Data)
                 const globalScoreDoc = doc(db, 'artifacts', appId, 'public', 'data', 'world_score');
                 onSnapshot(globalScoreDoc, (docSnap) => {
                     if (docSnap.exists()) {
-                        scoreEl.innerText = docSnap.data().total.toLocaleString();
+                        const total = docSnap.data().total;
+                        // อัปเดตค่าล่าสุดจาก Server (ถ้าค่า Server เยอะกว่าค่า Local)
+                        if (total > localCount) {
+                            localCount = total;
+                            scoreEl.innerText = localCount.toLocaleString();
+                        }
                     }
-                }, (err) => { 
-                    statusEl.innerText = "Reconnecting...";
+                }, (err) => {
+                    statusEl.innerText = "Syncing...";
                 });
             }
         });
