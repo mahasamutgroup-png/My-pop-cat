@@ -1,9 +1,10 @@
+```html
 <!DOCTYPE html>
 <html lang="th">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Orange Cat Pop! - World Score</title>
+    <title>Orange Cat Pop!</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@700;900&display=swap');
@@ -83,70 +84,66 @@
             100% { transform: translate(-50%, -120px) scale(1.6); opacity: 0; }
         }
 
-        .status-tag {
-            position: absolute;
-            bottom: 20px;
-            color: #f38241;
-            font-size: 0.8rem;
-            opacity: 0.8;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 4px 12px;
-            border-radius: 20px;
+        .reset-btn {
+            margin-top: 2rem;
+            color: #6b5a3e;
+            font-size: 0.9rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            opacity: 0.6;
+            background: transparent;
+            border: none;
+            cursor: pointer;
         }
     </style>
 </head>
 <body>
 
     <div class="score-number" id="score">0</div>
-    <div class="total-pops-label" id="label">WORLD WIDE POPS</div>
+    <div class="total-pops-label">TOTAL POPS</div>
 
     <div class="cat-frame" id="game-btn">
-        <img src="https://i.ibb.co/nN34kBWy/image.jpg" id="cat-closed" class="cat-image" alt="Cat Closed">
-        <img src="https://i.ibb.co/GfJ290Hr/image.jpg" id="cat-open" class="cat-image" alt="Cat Open">
+        <img src="https://i.ibb.co/VWzqcV6G/image.jpg" id="cat-closed" class="cat-image" alt="Cat Closed">
+        <img src="https://i.ibb.co/DfnfnQMP/image.jpg" id="cat-open" class="cat-image" alt="Cat Open">
     </div>
 
-    <div class="status-tag" id="status">Starting...</div>
-    <div style="position:fixed; bottom:5px; color:#4a3f2d; font-size:10px;">🚗 Reminder: รถจอดที่ชั้น B นะครับ</div>
+    <button onclick="resetScore()" class="reset-btn">Reset Score</button>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, increment, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-
-        // Firebase Configuration
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'global-popcat-v2';
-
-        let user = null;
-        // ดึงคะแนนเก่าจาก LocalStorage มาก่อนเลยถ้ามี
-        let localCount = parseInt(localStorage.getItem('cat_pops') || '0');
-        
+    <script>
+        let count = 0;
         const scoreEl = document.getElementById('score');
         const gameBtn = document.getElementById('game-btn');
-        const statusEl = document.getElementById('status');
-        const labelEl = document.getElementById('label');
-
-        // แสดงคะแนนล่าสุดที่จำได้ทันที
-        scoreEl.innerText = localCount.toLocaleString();
-
+        
         let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
         function playPopSound() {
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(400, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(1000, audioCtx.currentTime + 0.05);
-            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.1);
+            initAudio();
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            // ใช้ Oscillator แบบสั้นๆ เพื่อให้กดรัวได้โดยเสียงไม่สะสมจนหาย
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(500, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(1100, audioCtx.currentTime + 0.05);
+
+            gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.1);
         }
 
         function createPopText(x, y) {
@@ -159,32 +156,18 @@
             setTimeout(() => el.remove(), 400);
         }
 
-        async function syncGlobalScore() {
-            if (!user) return;
-            const globalScoreDoc = doc(db, 'artifacts', appId, 'public', 'data', 'world_score');
-            try {
-                // อัปเดตขึ้น Cloud
-                await setDoc(globalScoreDoc, { total: increment(1) }, { merge: true });
-            } catch (e) {
-                console.log("Cloud sync pending...");
-            }
-        }
-
         function handlePress(e) {
             if (e.cancelable) e.preventDefault();
+            
             document.body.classList.add('is-pressing');
+            count++;
+            scoreEl.innerText = count;
+            
             playPopSound();
             
-            // เพิ่มคะแนนแสดงผลทันทีแบบ Offline-First
-            localCount++;
-            scoreEl.innerText = localCount.toLocaleString();
-            localStorage.setItem('cat_pops', localCount);
-
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
             createPopText(clientX, clientY);
-
-            syncGlobalScore();
         }
 
         function handleRelease(e) {
@@ -192,45 +175,10 @@
             document.body.classList.remove('is-pressing');
         }
 
-        // เริ่มระบบเชื่อมต่อ
-        const startApp = async () => {
-            statusEl.innerText = "Connecting to World...";
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (err) {
-                statusEl.innerText = "Offline Mode (Saved Locally)";
-            }
-        };
-
-        startApp();
-
-        onAuthStateChanged(auth, (u) => {
-            user = u;
-            if (user) {
-                statusEl.innerText = "World Server Connected 🌍";
-                
-                const globalScoreDoc = doc(db, 'artifacts', appId, 'public', 'data', 'world_score');
-                
-                // ฟังคะแนนจากคนอื่นแบบ Real-time
-                onSnapshot(globalScoreDoc, (docSnap) => {
-                    if (docSnap.exists()) {
-                        const cloudTotal = docSnap.data().total;
-                        // ถ้าคะแนนบน Cloud เยอะกว่าที่เรามี ให้ขยับตาม Cloud
-                        if (cloudTotal > localCount) {
-                            localCount = cloudTotal;
-                            scoreEl.innerText = localCount.toLocaleString();
-                            localStorage.setItem('cat_pops', localCount);
-                        }
-                    }
-                }, (err) => {
-                    statusEl.innerText = "Syncing with others...";
-                });
-            }
-        });
+        function resetScore() {
+            count = 0;
+            scoreEl.innerText = count;
+        }
 
         gameBtn.addEventListener('mousedown', handlePress);
         window.addEventListener('mouseup', handleRelease);
@@ -240,3 +188,5 @@
     </script>
 </body>
 </html>
+
+```
